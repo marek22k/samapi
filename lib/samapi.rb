@@ -62,9 +62,9 @@ class SamApi
   #
   # @param _host [String] Host on which the SAM Server is running.
   # @param _port [Integer] Port on which the SAM Server is running.
-  def initialize _host = "127.0.0.1", _port = 7656
-    @host = _host
-    @port = _port
+  def initialize host: "127.0.0.1", port: 7656
+    @host = host
+    @port = port
     @socket = TCPSocket.new @host, @port
   end
   
@@ -96,17 +96,23 @@ class SamApi
   # actively communicating with the SAM server.
   def check_ping
     if @socket.ready? && @socket.ready? != 0 && ! @socket.closed?
-      ans = @socket.gets.chomp
-      if ans.downcase == "ping"
-        @socket.puts "PONG"
+      ans = @socket.gets.chomp.split " "
+      cmd = ans[0].downcase
+      arg = ans[1]
+      if cmd == "ping"
+        @socket.puts "PONG #{arg}"
       end
     end
   end
   
-  def send_ping
-    @socket.puts "PING"
-    ans = @socket.gets.chomp
-    return ans.downcase == "pong"
+  def send_ping _test = nil
+    test = _test
+    test = Time.now.to_i.to_s if ! test
+    @socket.puts "PING #{test}"
+    ans = @socket.gets.chomp.split " "
+    cmd = ans[0].downcase
+    arg = ans[1]
+    return cmd == "pong" && arg == test
   end
   
   # Performs a HELLO VERSION handshake with the SAM server.

@@ -3,7 +3,7 @@
 # GNU GPLv3
 
 # This program can transfer a file from one device to another.
-# For this it uses a tunnel, a backup tunnel each of a length of one hop.
+# For this it uses two tunnel, a backup tunnel each of a length of one hop.
 # This can be changed in the source code.
 # Requires gems: base32, base_x
 
@@ -13,6 +13,8 @@ require "base_x"
 require "openssl"
 require "securerandom"
 require_relative "samapi.rb"
+
+$chunk_size = 4 * 1024
 
 def set_status status
   if status[0]
@@ -79,14 +81,17 @@ def display_transfercode code
 end
 
 if ARGV[0]
+  id = "BeamBotSender#{Random.rand 100}"
+  
   if ! File.readable? ARGV[0]
-    puts "File to send unreadable."
+    puts "Error = File to send unreadable."
     exit!
   end
   
-  puts "Preparing file for sending (reading file into memory)..."
-  cnt = File.read ARGV[0]
+  puts "Task = Calculating checksum for file"
+  file_checksum = OpenSSL::Digest::MD5.file(ARGV[0]).hexdigest
   
+  puts "Task = Preparing i2p session"
   control = SamApi.new
   set_status control.handshake
   comm = SamApi.new
@@ -94,14 +99,26 @@ if ARGV[0]
 
   passwd = SecureRandom.random_bytes(5)
   
+  puts "Task = Preparing serving of file"
   server = TCPServer.new "127.0.0.1", 0
   Thread.new do
     loop {
       Thread.new(server.accept) { |socket|
+        header = socket.gets.chomp.split " "
+        b32 = hash_to_b32 privkey_to_hash header[0]
+        puts "Request from #{b32}"
         in_passwd = socket.read 5
-        socket.puts File.basename ARGV[0]
         if in_passwd == passwd
-          socket.write cnt
+          socket.puts File.basename ARGV[0]
+          socket.puts file_checksum
+          puts "#{b32} has successfully authenticated"
+          fil = File.open ARGV[0], "rb"
+          while ! fil.eof?
+            socket.write fil.read $chunk_size
+          end
+          fil.close
+        else
+          puts "WARNING - #{b32} did not authenticate successfully."
         end
         socket.close
       }
@@ -111,15 +128,16 @@ if ARGV[0]
   host = server.addr[3]
   port = server.addr[1]
 
+  puts "Task = Preparing i2p session"
   res = control.session_create(
     "STYLE" => "STREAM",
-    "ID" => "BeamBotSender",
+    "ID" => id,
     "DESTINATION" => "TRANSIENT",
     "SIGNATURE_TYPE" => "EdDSA_SHA512_Ed25519",
     "inbound.length" => "1",
     "outbound.length" => "1",
-    "inbound.quantity" => "1",
-    "outbound.quantity" => "1",
+    "inbound.quantity" => "2",
+    "outbound.quantity" => "2",
     "inbound.backupQuantity" => "1",
     "outbound.backupQuantity" => "1"
   )
@@ -127,10 +145,10 @@ if ARGV[0]
   set_status res
 
   set_status comm.stream_forward(
-    "ID" => "BeamBotSender",
+    "ID" => id,
     "PORT" => port,
     "HOST" => host,
-    "SILENT" => true
+    "SILENT" => false
   )
 
   hash = privkey_to_hash priv_key
@@ -147,18 +165,22 @@ if ARGV[0]
     sleep 10
   }
 else
+  id = "BeamBotRecipent#{Random.rand 100}"
+  
+  puts "Task = Preparing i2p session"
   control = SamApi.new
   set_status control.handshake
 
+  puts "Task = Preparing i2p session"
   res = control.session_create(
     "STYLE" => "STREAM",
-    "ID" => "BeamBotRecipent",
+    "ID" => id,
     "DESTINATION" => "TRANSIENT",
     "SIGNATURE_TYPE" => "EdDSA_SHA512_Ed25519",
     "inbound.length" => "1",
     "outbound.length" => "1",
-    "inbound.quantity" => "1",
-    "outbound.quantity" => "1",
+    "inbound.quantity" => "2",
+    "outbound.quantity" => "2",
     "inbound.backupQuantity" => "1",
     "outbound.backupQuantity" => "1"
   )
@@ -175,32 +197,55 @@ else
   passwd = res[1]
   hash = res[2]
   b32 = hash_to_b32 hash
+  puts "Task = Determine exact destination"
   lookup_result = control.naming_lookup b32
   set_status lookup_result
   b64 = lookup_result[1]
   
   control.check_ping
 
+  puts "Task = Connect to destination"
   comm = SamApi.new
   set_status comm.handshake
   stream = comm.stream_connect(
-    "ID" => "BeamBotRecipent",
+    "ID" => id,
     "DESTINATION" => b64
   )
   set_status stream
   
-  puts "Connected"
+  puts "Info = Connected"
   socket = stream[1]
-  puts "Authenticating..."
+  puts "Task = Authenticating"
+  passwd = "12345"
   socket.write passwd
   socket.flush
-  if socket.closed?
-    puts "Authentication failed"
+  if socket.closed? or socket.eof?
+    puts "Info = Authentication failed"
   else
-    puts "Authentication successful"
-    puts "Receive file..."
+    puts "Info = Authentication successful"
+    puts "Task = Receive file"
     filename = socket.gets.chomp
-    cnt = socket.read
-    File.write "recived_#{filename}", cnt
+    file_checksum = socket.gets.chomp
+    filename = "recived_#{filename}"
+    fil = File.new filename, "wb"
+    print "Task = Receive chunks"
+    STDOUT.flush
+    while ! socket.eof?
+      fil.write socket.read $chunk_size
+      print "."
+      STDOUT.flush
+    end
+    fil.close
+    puts
+    puts "Task = Checking the file for corruption"
+    calc_checksum = OpenSSL::Digest::MD5.file(filename).hexdigest
+    pp file_checksum
+    pp calc_checksum
+    if calc_checksum == file_checksum
+      puts "Info = The file was received successfully"
+    else
+      puts "Warning = The file was received corrupted"
+    end
+    puts
   end
 end
