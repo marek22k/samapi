@@ -216,7 +216,6 @@ else
   puts "Info = Connected"
   socket = stream[1]
   puts "Task = Authenticating"
-  passwd = "12345"
   socket.write passwd
   socket.flush
   if socket.closed? or socket.eof?
