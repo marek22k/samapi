@@ -95,12 +95,18 @@ class SamApi
   # and sends one if it does. This should always be called up when you are not
   # actively communicating with the SAM server.
   def check_ping
-    if @socket.ready? && @socket.ready? != 0
+    if @socket.ready? && @socket.ready? != 0 && ! @socket.closed?
       ans = @socket.gets.chomp
       if ans.downcase == "ping"
-        @socket.puts pong
+        @socket.puts "PONG"
       end
     end
+  end
+  
+  def send_ping
+    @socket.puts "PING"
+    ans = @socket.gets.chomp
+    return ans.downcase == "pong"
   end
   
   # Performs a HELLO VERSION handshake with the SAM server.
@@ -136,10 +142,10 @@ class SamApi
     return [status, ans]
   end
   
-  def stream_connect args = {}
+  def stream_connect args = {}, check = true
     ans = send_cmd :stream, :connect, args
-    status = ans[:args][:result] == "OK"
-    return [status, ans]
+    status = check ? ans[:args][:result] == "OK" : nil
+    return [status, @socket, ans]
   end
   
   def stream_accept args = {}
@@ -151,11 +157,11 @@ class SamApi
   def stream_forward args = {}
     ans = send_cmd :stream, :forward, args
     status = ans[:args][:result] == "OK"
-    return [status, @socket, ans]
+    return [status, ans]
   end
   
   def naming_lookup name
-    ans = send_cmd :naming, :lookup, {name: name}
+    ans = send_cmd :naming, :lookup, { "NAME" => name }
     status = ans[:args][:result] == "OK"
     name = ans[:args][:name]
     return [status, name, ans]
