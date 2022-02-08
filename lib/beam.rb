@@ -189,7 +189,7 @@ else
   print "Transfer code: TF "
   STDOUT.flush
   tf = gets.chomp
-  tf = tf.tr(" ", "").downcase
+  tf = tf.tr(" ", "").downcase.delete_prefix("tf")
   res = decode_hash tf
   if ! res[0]
     puts "Warning = Mismatch checksum"
