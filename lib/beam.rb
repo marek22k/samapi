@@ -238,8 +238,6 @@ else
     puts
     puts "Task = Checking the file for corruption"
     calc_checksum = OpenSSL::Digest::MD5.file(filename).hexdigest
-    pp file_checksum
-    pp calc_checksum
     if calc_checksum == file_checksum
       puts "Info = The file was received successfully"
     else
